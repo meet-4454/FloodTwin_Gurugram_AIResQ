@@ -153,6 +153,56 @@ HTML_CONTENT="""
     .popup-close{position:absolute;top:5px;right:8px;background:none;border:none;font-size:15px;cursor:pointer;color:#94a3b8}
     .popup-close:hover{color:#264351}
 
+    /* ══ FLOOD DEPTH POPUP ══════════════════════════════════════
+       Appears when the user clicks on a flooded polygon.
+       Styled to match the legend card, with a caret pointing
+       down to the exact click location.
+    ═══════════════════════════════════════════════════════════ */
+    #floodPopup{
+      position:absolute;z-index:2500;pointer-events:auto;display:none;
+      /* centred horizontally on the click point, lifted above it */
+      transform:translate(-50%,-100%);
+      animation:fpIn .18s cubic-bezier(.34,1.56,.64,1)
+    }
+    @keyframes fpIn{
+      from{opacity:0;transform:translate(-50%,-88%)}
+      to  {opacity:1;transform:translate(-50%,-100%)}
+    }
+    #floodPopup .fp-card{
+      background:rgba(255,255,255,.98);border:2px solid #5298A9;
+      border-radius:14px;padding:14px 18px 13px;
+      box-shadow:0 8px 28px rgba(82,152,169,.35);min-width:190px;position:relative
+    }
+    /* downward caret — border trick */
+    #floodPopup .fp-card::after{
+      content:'';position:absolute;bottom:-11px;left:50%;transform:translateX(-50%);
+      border:10px solid transparent;border-top-color:#5298A9
+    }
+    #floodPopup .fp-card::before{
+      content:'';position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);
+      border:8px solid transparent;border-top-color:rgba(255,255,255,.98);z-index:1
+    }
+    #floodPopup .fp-close{
+      position:absolute;top:7px;right:9px;background:none;border:none;
+      font-size:14px;cursor:pointer;color:#94a3b8;padding:2px 5px;border-radius:4px;line-height:1
+    }
+    #floodPopup .fp-close:hover{color:#264351;background:#f1f5f9}
+    #floodPopup .fp-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;padding-right:18px}
+    #floodPopup .fp-head-icon{font-size:17px}
+    #floodPopup .fp-head-title{font-size:12px;font-weight:700;color:#5298A9;text-transform:uppercase;letter-spacing:.8px}
+    #floodPopup .fp-depth{display:flex;align-items:baseline;gap:5px;margin-bottom:8px}
+    #floodPopup .fp-depth-val{font-size:30px;font-weight:800;color:#264351;font-variant-numeric:tabular-nums;line-height:1}
+    #floodPopup .fp-depth-unit{font-size:13px;font-weight:600;color:#64748b}
+    #floodPopup .fp-badge{
+      display:inline-flex;align-items:center;gap:6px;
+      padding:4px 11px;border-radius:20px;
+      font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px
+    }
+    #floodPopup .fp-badge .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+    #floodPopup .fp-divider{height:1px;background:#e2e8f0;margin:0 0 8px}
+    #floodPopup .fp-meta{font-size:11px;color:#64748b;line-height:1.7}
+    #floodPopup .fp-meta b{color:#475569}
+
     /* ── LEGEND ── */
     #legend{
       position:absolute;top:28px;right:28px;
@@ -224,6 +274,30 @@ HTML_CONTENT="""
 
 <div id="map"></div>
 <div id="chunkLoadingIndicator">Loading timestep data…</div>
+
+<!-- ══ FLOOD DEPTH POPUP ══ (positioned by JS on polygon click) -->
+<div id="floodPopup">
+  <div class="fp-card">
+    <button class="fp-close" id="fpClose">✕</button>
+    <div class="fp-head">
+      <span class="fp-head-icon">💧</span>
+      <span class="fp-head-title">Flood Depth</span>
+    </div>
+    <div class="fp-depth">
+      <span class="fp-depth-val" id="fpVal">—</span>
+      <span class="fp-depth-unit">metres</span>
+    </div>
+    <div class="fp-badge" id="fpBadge">
+      <span class="dot" id="fpDot"></span>
+      <span id="fpLabel">—</span>
+    </div>
+    <div class="fp-divider"></div>
+    <div class="fp-meta">
+      <b>Time:</b> <span id="fpTime">—</span><br>
+      <b>Location:</b> <span id="fpCoords">—</span>
+    </div>
+  </div>
+</div>
 
 <!-- ════ SIDEBAR ════ -->
 <div id="sidebar">
@@ -380,6 +454,114 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const esc   = s  => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 /* ══════════════════════════════════════════════════════════
+   FLOOD DEPTH POPUP
+   ─────────────────────────────────────────────────────────
+   polygonRings: parsed once after coordinatesBuffer loads.
+     polygonRings[p] = [ {lng, lat}, … ]  (ring vertices)
+
+   On map click we ray-cast through every flooded polygon at
+   the current timestep.  First hit → show popup.
+   Miss → fall through to reverse-geocode as before.
+══════════════════════════════════════════════════════════ */
+let polygonRings = null;   // built once in buildPolygonRings()
+
+/* Parse binary coordinatesBuffer → per-polygon vertex arrays */
+function buildPolygonRings() {
+  if (!coordinatesBuffer || polygonRings) return;
+  const dv = new DataView(coordinatesBuffer);
+  polygonRings = [];
+  let off = 0;
+  for (let p = 0; p < polygonCount; p++) {
+    const pc = dv.getUint32(off, true); off += 4;
+    const ring = [];
+    for (let i = 0; i < pc; i++) {
+      ring.push({ lng: dv.getFloat64(off, true), lat: dv.getFloat64(off + 8, true) });
+      off += 16;
+    }
+    polygonRings.push(ring);
+  }
+}
+
+/* Classic even-odd ray-cast — works for any simple polygon */
+function pointInPolygon(lng, lat, ring) {
+  let inside = false;
+  const n = ring.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = ring[i].lng, yi = ring[i].lat;
+    const xj = ring[j].lng, yj = ring[j].lat;
+    if (((yi > lat) !== (yj > lat)) &&
+        (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+/* Severity thresholds matching the legend */
+const SEV = [
+  { max:0.5,      label:'Low',      bg:'#e6f7f9', color:'#0e7490', dot:'#6BC3D2' },
+  { max:1.0,      label:'Moderate', bg:'#cceef5', color:'#0369a1', dot:'#5298A9' },
+  { max:2.0,      label:'High',     bg:'#b3dde8', color:'#155e75', dot:'#49879A' },
+  { max:Infinity, label:'Severe',   bg:'#264351', color:'#ffffff', dot:'#264351' }
+];
+
+/* Popup element refs */
+const fpPopup  = document.getElementById('floodPopup');
+const fpVal    = document.getElementById('fpVal');
+const fpBadge  = document.getElementById('fpBadge');
+const fpDot    = document.getElementById('fpDot');
+const fpLabel  = document.getElementById('fpLabel');
+const fpTime   = document.getElementById('fpTime');
+const fpCoords = document.getElementById('fpCoords');
+
+let fpLat = null, fpLng = null;
+
+document.getElementById('fpClose').addEventListener('click', () => {
+  fpPopup.style.display = 'none'; fpLat = fpLng = null;
+});
+
+/* Reposition popup when the map pans/zooms */
+function repositionFloodPopup() {
+  if (fpPopup.style.display === 'none' || fpLat === null) return;
+  try {
+    const pt = map.project({ lat: fpLat, lng: fpLng });
+    fpPopup.style.left = pt.x + 'px';
+    fpPopup.style.top  = (pt.y - 14) + 'px';   // 14 px gap above click
+  } catch(e) {}
+}
+
+function showFloodPopup(lng, lat, depth) {
+  const sev = SEV.find(s => depth < s.max);
+  fpLat = lat; fpLng = lng;
+
+  fpVal.textContent = depth.toFixed(2);
+
+  fpBadge.style.background = sev.bg;
+  fpBadge.style.color       = sev.color;
+  fpDot.style.background    = sev.dot;
+  fpLabel.textContent       = sev.label;
+
+  fpTime.textContent   = document.getElementById('timeDisplay').textContent;
+  fpCoords.textContent = `${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E`;
+
+  fpPopup.style.display = 'block';
+  repositionFloodPopup();
+}
+
+/* Returns true if a flooded polygon was hit (popup shown) */
+async function tryFloodHit(lat, lng) {
+  if (!polygonRings) return false;
+  const depths = await getDepth(currentStep);
+  if (!depths) return false;
+  for (let p = 0; p < polygonCount; p++) {
+    if (depths[p] <= 0) continue;
+    if (pointInPolygon(lng, lat, polygonRings[p])) {
+      showFloodPopup(lng, lat, depths[p]);
+      return true;
+    }
+  }
+  return false;
+}
+
+/* ══════════════════════════════════════════════════════════
    CRITICAL ASSETS
    — Exact replication of the reference MapLibre code's
      OSM Overpass fetch, sequential loader, DOM markers
@@ -524,11 +706,12 @@ function addMarkers(key, features) {
   if (badge) badge.textContent = features.length;
 }
 
-/* ── Reposition all visible markers on camera events ── */
+/* ── Reposition all visible markers + flood popup on camera events ── */
 function syncAllMarkers() {
   ASSET_CATS.forEach(c => {
     catMarkers[c.key].forEach(m => m.posUpdate());
   });
+  repositionFloodPopup();
 }
 
 /* ── Fetch one category from Overpass (exact copy of reference logic) ── */
@@ -642,9 +825,19 @@ function initSearch() {
       list.style.display = 'none';
   });
 
-  /* Reverse geocoding on map click */
+  /* Map click: flood polygon hit-test first, reverse-geocode as fallback */
   map.on('click', async e => {
     const { lat, lng } = e.lngLat;
+
+    /* Close any open OSM asset popup */
+    document.querySelectorAll('.osm-popup').forEach(p => p.remove());
+
+    /* 1️⃣  Check if click lands inside a flooded polygon */
+    const hit = await tryFloodHit(lat, lng);
+    if (hit) return;   // ← show depth popup; skip geocode
+
+    /* 2️⃣  Miss — close any open flood popup and reverse-geocode */
+    fpPopup.style.display = 'none'; fpLat = fpLng = null;
     const label = await nominatimReverse(lat, lng);
     input.value = label;
     flyPin(lat, lng, label);
@@ -816,6 +1009,7 @@ async function initializeVisualization() {
     const cr = await fetch('coordinates.bin');
     if (!cr.ok) throw new Error(`coordinates.bin ${cr.status}`);
     coordinatesBuffer = await cr.arrayBuffer();
+    buildPolygonRings();   // pre-parse rings for click hit-testing
 
     setStatus('50% – Preloading initial chunks…');
     await Promise.all([loadChunk(0), loadChunk(1)]);
@@ -910,6 +1104,8 @@ async function updateStep(step) {
   step = Math.max(0, Math.min(TOTAL_STEPS, step));
   const depths = await getDepth(step); if (!depths) return;
   currentStep = step; buildMesh(depths);
+  /* Dismiss depth popup — depth changes with each timestep */
+  fpPopup.style.display = 'none'; fpLat = fpLng = null;
   /* preload next chunk */
   const nc = Math.floor(step/CHUNK_SIZE)+1;
   if (nc < TOTAL_CHUNKS && !chunkCache.has(nc) && !chunkQueue.has(nc)) loadChunk(nc).catch(()=>{});
@@ -968,7 +1164,8 @@ setTimeout(initializeVisualization, 0);
 })();
 </script>
 </body>
-</html>"""
+</html>
+"""
 
 
 @app.route('/')
