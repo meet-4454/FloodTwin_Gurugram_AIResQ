@@ -1,24 +1,8 @@
-from flask import Flask, send_from_directory, request, jsonify
+from flask import Flask, send_from_directory
 from waitress import serve
 import os
-import requests
-import random
-import time
 
 app = Flask(__name__)
-
-# Rotate between different user agents to avoid rate limiting
-USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:122.0) Gecko/20100101 Firefox/122.0',
-    'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0'
-]
-
-last_request_time = {}
-request_count = {}
 
 HTML_CONTENT="""
 <!DOCTYPE html>
@@ -658,8 +642,11 @@ function showMarkers(key) {
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 <<<<<<< HEAD
+=======
+>>>>>>> b17810c (retained changes)
 /* ── Remove all DOM markers for a category ── */
 >>>>>>> 648fada (changes retained)
 function hideMarkers(key) {
@@ -667,44 +654,6 @@ function hideMarkers(key) {
   catMarkers[key] = [];
   document.querySelectorAll('.osm-popup').forEach(p => p.remove());
 }
-=======
-  function showMarkers(key){
-    if(catFeatures[key] && catFeatures[key].length > 0){ 
-      addMarkers(key, catFeatures[key]); 
-      return; 
-    }
-    
-    // If not loaded yet or failed, try to fetch again
-    const pill = document.querySelector(`.asset-pill[data-cat="${key}"]`);
-    if(pill) pill.style.opacity = '0.7';
-    
-    fetchCategory(key).then(result => { 
-      if(result.success){
-        catFeatures[key] = result.data; 
-        if(result.data.length > 0){
-          addMarkers(key, result.data);
-          const badge = document.getElementById('cnt-'+key);
-          if(badge) badge.textContent = result.data.length;
-        }
-        if(pill) pill.style.opacity = '1';
-      } else {
-        console.error(`Failed to load ${key}:`, result.error);
-        if(pill){
-          pill.style.opacity = '0.5';
-          pill.title = `Failed to load: ${result.error}`;
-        }
-        // Turn it back off since load failed
-        catEnabled[key] = false;
-        pill.classList.remove('on');
-      }
-    });
-  }
-  
-  function hideMarkers(key){
-    catMarkers[key].forEach(m => m.remove());
-    catMarkers[key] = [];
-  }
->>>>>>> 8be047a (changes retained)
 
 function addMarkers(key, features) {
   hideMarkers(key);
@@ -731,8 +680,11 @@ function addMarkers(key, features) {
     mapEl.appendChild(el);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 <<<<<<< HEAD
+=======
+>>>>>>> b17810c (retained changes)
     /* Position helper — called on every camera event */
 >>>>>>> 648fada (changes retained)
     const posUpdate = () => {
@@ -838,103 +790,6 @@ async function fetchAllOverpass(retries = 5) {
       if (res.status === 429 || res.status === 504 || res.status === 503) {
         await sleep(2000 * (attempt + 1));
         continue;
-=======
-  async function fetchCategory(key){
-    const cat = ASSET_CATS.find(c => c.key===key);
-    if(!cat) return { success: false, data: [], error: 'Category not found' };
-
-    const bbox = '28.20,76.70,28.60,77.30';
-
-    let ql;
-    const t = cat.tags;
-    if(t.startsWith('(')){
-      const inner = t.slice(1, t.lastIndexOf(')'));
-      const stmts = inner.split(';').filter(Boolean);
-      ql = '[out:json];(' + stmts.map(s => `node${s}(${bbox});way${s}(${bbox});`).join('') + ');out center;';
-    } else {
-      ql = `[out:json];(node${t}(${bbox});way${t}(${bbox}););out center;`;
-    }
-
-    // Retry with exponential backoff
-    for(let attempt = 1; attempt <= 5; attempt++){
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 20000); // 20s timeout for server roundtrip
-        
-        // Use proxy endpoint with rotating user agents
-        const res = await fetch('/api/overpass', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            query: encodeURIComponent(ql),
-            category: key 
-          }),
-          signal: controller.signal
-        });
-        clearTimeout(timeout);
-
-        const proxyResponse = await res.json();
-        
-        if(proxyResponse.status === 429){
-          const backoff = Math.min(1000 * Math.pow(2, attempt), 10000); // Exponential backoff, max 10s
-          console.warn(`⚠️ Overpass rate limit for "${key}" – attempt ${attempt}/5, waiting ${backoff}ms… (agent ${proxyResponse.user_agent_used})`);
-          await sleep(backoff);
-          continue;
-        }
-        
-        if(proxyResponse.status === 504 || proxyResponse.status === 503){
-          console.warn(`⚠️ Overpass server busy (${proxyResponse.status}) for "${key}" – attempt ${attempt}/5`);
-          await sleep(2000 * attempt);
-          continue;
-        }
-        
-        if(proxyResponse.status === 408){
-          console.warn(`⏱️ Timeout for "${key}" attempt ${attempt}/5`);
-          if(attempt < 5){
-            await sleep(1500 * attempt);
-            continue;
-          }
-          return { success: false, data: [], error: 'Timeout' };
-        }
-        
-        if(!res.ok || proxyResponse.status !== 200){
-          console.warn(`⚠️ Overpass HTTP ${proxyResponse.status} for "${key}"`);
-          if(attempt < 5){
-            await sleep(1000 * attempt);
-            continue;
-          }
-          return { success: false, data: [], error: `HTTP ${proxyResponse.status}` };
-        }
-
-        const json = proxyResponse.data;
-        
-        if(!json || !json.elements){
-          console.warn(`⚠️ No elements in response for "${key}"`);
-          return { success: false, data: [], error: 'Invalid response' };
-        }
-        
-        const elements = json.elements
-          .filter(el => (el.lat!=null && el.lon!=null) || el.center)
-          .map(el => ({
-            type:'Feature',
-            geometry:{ type:'Point', coordinates:[ el.lon??el.center.lon, el.lat??el.center.lat ] },
-            properties: el.tags || {}
-          }));
-        
-        console.log(`✅ Fetched ${elements.length} items for ${key} (user-agent ${proxyResponse.user_agent_used})`);
-        return { success: true, data: elements, error: null };
-
-      } catch(e){
-        if(e.name === 'AbortError'){
-          console.warn(`⏱️ Timeout for "${key}" attempt ${attempt}/5`);
-        } else {
-          console.warn(`❌ Fetch error for "${key}" attempt ${attempt}/5:`, e.message);
-        }
-        
-        if(attempt < 5){
-          await sleep(1500 * attempt); // Progressive delay
-        }
->>>>>>> 8be047a (changes retained)
       }
       if (!res.ok) { await sleep(1500); continue; }
 
@@ -945,7 +800,6 @@ async function fetchAllOverpass(retries = 5) {
     } catch (e) {
       if (attempt < retries - 1) await sleep(1500 * (attempt + 1));
     }
-<<<<<<< HEAD
   }
   return [];
 }
@@ -1113,75 +967,6 @@ const customLayer = {
       .multiply(rx).multiply(ry).multiply(rz);
     camera.projectionMatrix = m.multiply(l);
     renderer.resetState(); renderer.render(scene, camera); glMap.triggerRepaint();
-=======
-    
-    console.error(`❌ All attempts failed for "${key}"`);
-    return { success: false, data: [], error: 'All retries exhausted' };
-  }
-
-  async function loadAllAssets(){
-    renderAssetPills();
-    const ab = document.getElementById('assetBadge');
-    ab.textContent = 'Loading…';
-    ab.style.background = '#fbbf24';
-    ab.style.color = '#78350f';
-
-    let loaded = 0;
-    let failed = 0;
-    
-    // Load all categories in parallel with staggered starts to avoid overwhelming Overpass
-    const promises = ASSET_CATS.map((c, idx) => 
-      sleep(idx * 800).then(() => // Stagger by 800ms each
-        fetchCategory(c.key).then(result => {
-          catFeatures[c.key] = result.data;
-          
-          const badge = document.getElementById('cnt-'+c.key);
-          const pill = document.querySelector(`.asset-pill[data-cat="${c.key}"]`);
-          
-          if(result.success){
-            loaded++;
-            if(badge) badge.textContent = result.data.length;
-            if(pill) pill.style.opacity = '1';
-          } else {
-            failed++;
-            if(badge) badge.textContent = '✗';
-            if(pill){
-              pill.style.opacity = '0.5';
-              pill.title = `Failed to load: ${result.error}`;
-            }
-            console.error(`Failed to load ${c.key}:`, result.error);
-          }
-          
-          // Update badge progress
-          const total = loaded + failed;
-          ab.textContent = `${total}/${ASSET_CATS.length}`;
-          
-          return result;
-        })
-      )
-    );
-
-    // Wait for all to complete
-    await Promise.allSettled(promises);
-
-    // Final status
-    if(failed === 0){
-      ab.textContent = '✓ Ready';
-      ab.style.background = '#10b981';
-      ab.style.color = '#ffffff';
-      console.log('✅ All critical assets loaded successfully');
-    } else if(loaded > 0){
-      ab.textContent = `⚠️ ${loaded}/${ASSET_CATS.length}`;
-      ab.style.background = '#f59e0b';
-      ab.style.color = '#ffffff';
-      console.warn(`⚠️ Partial load: ${loaded} succeeded, ${failed} failed`);
-    } else {
-      ab.textContent = '✗ Failed';
-      ab.style.background = '#ef4444';
-      ab.style.color = '#ffffff';
-      console.error('❌ All critical assets failed to load');
-    }
->>>>>>> 8be047a (changes retained)
   }
 };
 
@@ -1643,59 +1428,6 @@ setTimeout(initializeVisualization, 0);
 def home():
     return HTML_CONTENT
 
-@app.route('/api/overpass', methods=['POST'])
-def overpass_proxy():
-    """Proxy endpoint for Overpass API requests with user agent rotation"""
-    try:
-        data = request.get_json()
-        query = data.get('query', '')
-        category = data.get('category', 'unknown')
-        
-        if not query:
-            return jsonify({'error': 'No query provided'}), 400
-        
-        # Rate limiting per category (min 1 second between requests)
-        current_time = time.time()
-        if category in last_request_time:
-            time_diff = current_time - last_request_time[category]
-            if time_diff < 1.0:
-                time.sleep(1.0 - time_diff)
-        
-        last_request_time[category] = time.time()
-        request_count[category] = request_count.get(category, 0) + 1
-        
-        # Select user agent based on category and request count for diversity
-        agent_index = (request_count[category] + hash(category)) % len(USER_AGENTS)
-        user_agent = USER_AGENTS[agent_index]
-        
-        url = 'https://overpass-api.de/api/interpreter?data=' + query
-        
-        headers = {
-            'User-Agent': user_agent,
-            'Accept': 'application/json',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': 'https://overpass-turbo.eu/',
-            'Origin': 'https://overpass-turbo.eu'
-        }
-        
-        # Make request with timeout
-        response = requests.get(url, headers=headers, timeout=15)
-        
-        # Return the response
-        return jsonify({
-            'status': response.status_code,
-            'data': response.json() if response.status_code == 200 else None,
-            'error': None if response.status_code == 200 else f'HTTP {response.status_code}',
-            'user_agent_used': agent_index  # For debugging
-        }), response.status_code
-        
-    except requests.Timeout:
-        return jsonify({'error': 'Request timeout', 'status': 408}), 408
-    except requests.RequestException as e:
-        return jsonify({'error': str(e), 'status': 500}), 500
-    except Exception as e:
-        return jsonify({'error': str(e), 'status': 500}), 500
-
 # Serve static files (e.g. flood_depth_master_slim.geojson, flood_depths.bin) from the same directory as this script
 @app.route('/<path:filename>')
 def static_files(filename):
@@ -1703,13 +1435,14 @@ def static_files(filename):
     return send_from_directory(base_dir, filename)
 
 if __name__ == '__main__':
-    print("Starting FloodTwin server on http://localhost:9120")
+    print("Starting FloodTwin server on http://0.0.0.0:9120")
     serve(
         app,
         host='0.0.0.0',
         port=9120,
         threads=8,              # User requested
+        channel_timeout=300,    # User requested
         ident='3DFloodTwin',      # Server identity
         connection_limit=500,   # Limit connections for small scale
+        cleanup_interval=30     # Cleanup inactive connections
     )
-
