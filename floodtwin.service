@@ -1,0 +1,14 @@
+[Unit]
+Description=flood twin 3D
+After=network.target
+
+[Service]
+Type=simple
+User=production
+WorkingDirectory=/home/production/airesq/floodtwin
+ExecStart=/home/production/miniconda3/envs/floodtwin/bin/gunicorn -w 4 --bind 0.0.0.0:9120 main:app
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
