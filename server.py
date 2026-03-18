@@ -641,14 +641,6 @@ function showMarkers(key) {
   }
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-=======
->>>>>>> b17810c (retained changes)
-/* ── Remove all DOM markers for a category ── */
->>>>>>> 648fada (changes retained)
 function hideMarkers(key) {
   catMarkers[key].forEach(m => m.el.remove());
   catMarkers[key] = [];
@@ -679,14 +671,7 @@ function addMarkers(key, features) {
     el.textContent = cat.icon;
     mapEl.appendChild(el);
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-=======
->>>>>>> b17810c (retained changes)
-    /* Position helper — called on every camera event */
->>>>>>> 648fada (changes retained)
+
     const posUpdate = () => {
       try {
         const pt = map.project({ lat, lng });
